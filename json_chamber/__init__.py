@@ -1,23 +1,18 @@
-"""
-json_chamber – public surface
-
-  cloak_json(obj)  →  sealed dict  (safe to ship; shares alone are useless)
-  open_json(sealed) → original obj (requires both shares + master + live license)
-
-No TRU8 compression engine is present. This is pure Chamber security.
-"""
+"""json-chamber — pure JSON sealing. No TRU8 engine."""
 
 from .api import cloak_json, open_json, cloak_bytes, open_bytes
-from .license import LicenseError, require_alive, license_status
+from .core import WORDLIST
+from .license import LicenseError, license_status, require_alive, verifieddr_check
 
 __all__ = [
     "cloak_json",
     "open_json",
     "cloak_bytes",
     "open_bytes",
+    "WORDLIST",
     "LicenseError",
-    "require_alive",
     "license_status",
+    "require_alive",
+    "verifieddr_check",
 ]
-
-__version__ = "0.1.0"
+__version__ = "1.0.0"
