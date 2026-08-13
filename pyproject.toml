@@ -4,15 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "json-chamber"
-version = "1.0.0"
-description = "Chamber JSON sealing — φ-split keyword shares, 24h BSL eval, $99 unlock. TRU8 tier is separate ($1,900/project/year)."
+version = "1.1.0"
+description = "Chamber JSON sealing — φ-split keyword shares, 24h BSL eval, $99 unlock. Public optimizer (benefit_check, delta, group, dedup). TRU8 engine is separate ($1,900/project/year)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Business Source License 1.1" }
 authors = [
   { name = "Slid Phi Labs", email = "corey@slidphilabs.com" }
 ]
-keywords = ["chamber", "seal", "cloak", "json", "security", "bsl", "trial"]
+keywords = ["chamber", "seal", "cloak", "json", "security", "bsl", "trial", "benefit_check"]
 dependencies = [
   "cryptography>=42.0.0",
 ]
