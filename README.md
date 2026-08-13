@@ -31,6 +31,15 @@ sealed = cloak_json({"api_key": "sk-...", "config": {...}})
 original = open_json(sealed)
 ```
 
+## Format specification
+
+**[Chamber Format Spec v1](./CHAMBER-FORMAT-v1.md)** — wire format only
+(sealed object shape, φ-split, AES-256-GCM, keyword encoding).
+
+License enforcement, trial duration, and unlock are **out of scope** of the format.
+
+Suggested media type (informative): `application/chamber+json`.
+
 ## Licensing
 
 - **24-hour evaluation** from first run (HMAC-signed license under `~/.chamber/`).
@@ -67,5 +76,6 @@ original = open_json(sealed)
 ## Links
 
 - Product page: https://www.slidphilabs.com/chamber
+- Format spec: [CHAMBER-FORMAT-v1.md](./CHAMBER-FORMAT-v1.md)
 - Unlock: $199 via Stripe (see product page)
 - Lab: Slid Phi Labs
