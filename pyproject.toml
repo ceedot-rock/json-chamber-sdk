@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Chamber – JSON sealing with φ-split keyword shares, 24-hour trial kill-switch, and VerifiedDR gate."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary – trial then unlock" }
+license = { text = "Business Source License 1.1" }
 authors = [
   { name = "Slid Phi Labs" }
 ]

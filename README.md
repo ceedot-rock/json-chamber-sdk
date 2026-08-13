@@ -42,6 +42,14 @@ Suggested media type (informative): `application/chamber+json`.
 
 ## Licensing
 
+**License:** [Business Source License 1.1](./LICENSE)  
+- Non-production use free under BSL 1.1  
+- Production use requires paid unlock (Additional Use Grant: None)  
+- Change Date: 2030-08-13 → Apache-2.0  
+- TRU8 compression engine is **not** in this package and is not licensed here
+
+### Runtime trial (orthogonal to BSL)
+
 - **24-hour evaluation** from first run (HMAC-signed license under `~/.chamber/`).
 - Hard cut at 24 h – no grace period. After that the chamber hard-kills.
 - Set `VERIFIEDDR_API_KEY` to a purchased key (`…purchased…` / `…pro…` / `…live_…`) for permanent unlock.
@@ -78,4 +86,4 @@ Suggested media type (informative): `application/chamber+json`.
 - Product page: https://www.slidphilabs.com/chamber
 - Format spec: [CHAMBER-FORMAT-v1.md](./CHAMBER-FORMAT-v1.md)
 - Unlock: $199 via Stripe (see product page)
-- Lab: Slid Phi Labs
+- Lab: [Slid Phi Labs](https://www.slidphilabs.com)
