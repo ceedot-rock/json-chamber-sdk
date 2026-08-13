@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 
+# Demo credentials (eval mode).  Replace with real purchased key for unlock.
 os.environ.setdefault("VERIFIEDDR_API_KEY", "vdr_demo_eval")
 os.environ.setdefault("CHAMBER_MASTER_SECRET", "chamber-demo-master-secret-32b!!")
 

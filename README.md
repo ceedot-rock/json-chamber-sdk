@@ -15,7 +15,19 @@ pip install -e .
 ```python
 from json_chamber import cloak_json, open_json
 
+# Lend this to ANY codebase – no TRU8 engine inside
 sealed = cloak_json({"api_key": "sk-...", "config": {...}})
+
+# They can store / ship this – but k_words alone is useless
+# {
+#   "k_words": "ward veil spire lock ...",
+#   "r_words": "oath cloak shard mark ...",
+#   "nonce": "...",
+#   "tag": "...",
+#   "ct": "..."
+# }
+
+# Only opens with both shares + master + VerifiedDR address
 original = open_json(sealed)
 ```
 
