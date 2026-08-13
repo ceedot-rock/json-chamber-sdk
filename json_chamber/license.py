@@ -1,12 +1,14 @@
 """
-Chamber license – 24-hour eval kill-switch + VerifiedDR gate.
+Chamber license – 24-hour eval kill-switch + purchase unlock.
+
+Tiered product line (Slid Phi Labs):
+  json-chamber  – $99 one-time / domain (this package, BSL-1.1)
+  tru8-chamber  – $1,900 / project / year (proprietary; not in this repo)
 
 - First run writes a signed license.json under ~/.chamber/
-- After 24 hours (hard cut, no grace) the box hard-kills unless a purchased
-  VerifiedDR key is present.
-- Any tamper of the license file → immediate kill.
-- VERIFIEDDR_API_KEY starting with vdr_/test_/demo enables eval mode;
-  keys containing "purchased" / "pro" / "live_" unlock permanently.
+- After 24 hours (hard cut, no grace) the box hard-kills unless purchased
+- Any tamper of the license file → immediate kill
+- VERIFIEDDR_API_KEY containing purchased / pro / live_ unlocks permanently
 """
 
 from __future__ import annotations
@@ -23,8 +25,14 @@ LICENSE_DIR = Path.home() / ".chamber"
 LICENSE_FILE = LICENSE_DIR / "license.json"
 KILL_FILE = LICENSE_DIR / "KILLED"
 
-EVAL_DAYS = 1          # 24 hours
-GRACE_HOURS = 0         # hard cut – no grace
+EVAL_DAYS = 1
+GRACE_HOURS = 0
+
+PURCHASE_URL = os.environ.get(
+    "CHAMBER_PURCHASE_URL",
+    "https://www.slidphilabs.com/chamber",
+)
+PRICE_USD = 99
 
 
 class LicenseError(RuntimeError):
@@ -32,8 +40,10 @@ class LicenseError(RuntimeError):
 
 
 def _master_bytes() -> bytes:
-    raw = os.environ.get("CHAMBER_MASTER_SECRET") or os.environ.get(
-        "TRU8_MASTER_SECRET", "chamber-demo-master-secret-32b!!"
+    raw = (
+        os.environ.get("CHAMBER_MASTER_SECRET")
+        or os.environ.get("JSON_CHAMBER_MASTER")
+        or os.environ.get("TRU8_MASTER_SECRET", "chamber-demo-master-secret-32b!!")
     )
     b = raw.encode("utf-8")
     if len(b) < 32:
@@ -51,29 +61,25 @@ def _ensure_dir() -> None:
 
 
 def verifieddr_check() -> dict[str, Any]:
-    """Lightweight VerifiedDR gate (env-key driven for the trial package)."""
+    """Env-key driven gate. Missing key = open-source eval allowed."""
     key = os.environ.get("VERIFIEDDR_API_KEY", "")
     if not key:
         return {
-            "verified": False,
-            "reason": "VERIFIEDDR_API_KEY not set",
-            "purchased": False,
-            "eval_mode": False,
-        }
-    if key.startswith(("vdr_", "test_", "demo")):
-        purchased = any(tok in key for tok in ("purchased", "pro", "live_"))
-        return {
             "verified": True,
-            "reason": "ok",
-            "purchased": purchased,
-            "eval_mode": not purchased,
-            "app_id": "chamber-eval",
+            "reason": "open-source eval (no VERIFIEDDR_API_KEY)",
+            "purchased": False,
+            "eval_mode": True,
+            "tier": "json-chamber",
         }
+    purchased = any(tok in key for tok in ("purchased", "pro", "live_"))
+    tru8 = "tru8" in key.lower()
     return {
-        "verified": False,
-        "reason": "unrecognised VERIFIEDDR_API_KEY",
-        "purchased": False,
-        "eval_mode": False,
+        "verified": True,
+        "reason": "ok",
+        "purchased": purchased,
+        "eval_mode": not purchased,
+        "tier": "tru8-chamber" if tru8 else "json-chamber",
+        "app_id": "chamber",
     }
 
 
@@ -84,27 +90,25 @@ def _load_or_create() -> dict[str, Any]:
 
     if LICENSE_FILE.exists():
         try:
-            raw = json.loads(LICENSE_FILE.read_text(encoding="utf-8"))
-            sig = raw.pop("sig", "")
-            expected = _sign(raw)
-            if not hmac.compare_digest(sig, expected):
-                KILL_FILE.write_text("tamper", encoding="utf-8")
-                raise LicenseError("License tamper detected – chamber killed")
-            return raw
-        except LicenseError:
-            raise
-        except Exception:
-            pass
+            data = json.loads(LICENSE_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            KILL_FILE.write_text("tamper-parse", encoding="utf-8")
+            raise LicenseError(f"license file unreadable – killed: {e}") from e
+
+        sig = data.pop("sig", None)
+        if not sig or not hmac.compare_digest(sig, _sign(data)):
+            KILL_FILE.write_text("tamper-sig", encoding="utf-8")
+            raise LicenseError("license signature mismatch – killed")
+        return data
 
     now = int(time.time())
     lic = {
         "type": "eval",
+        "product": "json-chamber",
         "first_run": now,
         "eval_expires": now + EVAL_DAYS * 86400,
         "purchased": False,
-        "device_hash": hashlib.sha256(
-            str(Path.home()).encode()
-        ).hexdigest()[:16],
+        "device_hash": hashlib.sha256(str(Path.home()).encode()).hexdigest()[:16],
     }
     signed = dict(lic)
     signed["sig"] = _sign(lic)
@@ -113,30 +117,27 @@ def _load_or_create() -> dict[str, Any]:
 
 
 def require_alive() -> dict[str, Any]:
+    """Call on every cloak/open. Raises LicenseError if dead."""
     if KILL_FILE.exists():
-        raise LicenseError("Chamber hard-killed")
+        raise LicenseError(
+            f"Chamber hard-killed. json-chamber unlock: ${PRICE_USD} → {PURCHASE_URL}"
+        )
 
     lic = _load_or_create()
     gate = verifieddr_check()
 
     if gate.get("purchased") or lic.get("purchased"):
         lic["purchased"] = True
-        return {"license": lic, "gate": gate, "status": "purchased"}
-
-    if not gate.get("verified"):
-        raise LicenseError(
-            f"VerifiedDR gate closed: {gate.get('reason', 'unknown')}"
-        )
+        return {"license": lic, "gate": gate, "status": "purchased", "price": PRICE_USD}
 
     now = int(time.time())
     expires = int(lic.get("eval_expires", 0))
-    grace = GRACE_HOURS * 3600
-
-    if now > expires + grace:
+    if now > expires + GRACE_HOURS * 3600:
         KILL_FILE.write_text("expired", encoding="utf-8")
         raise LicenseError(
-            f"24-hour evaluation expired (ended {expires}). "
-            "Purchase unlock to restore Chamber."
+            f"json-chamber 24h eval ended. "
+            f"Price ${PRICE_USD} one-time → {PURCHASE_URL} "
+            f"(or set VERIFIEDDR_API_KEY=vdr_purchased_…)"
         )
 
     remaining = max(0, expires - now)
@@ -145,11 +146,14 @@ def require_alive() -> dict[str, Any]:
         "gate": gate,
         "status": "eval",
         "seconds_remaining": remaining,
+        "price": PRICE_USD,
+        "purchase_url": PURCHASE_URL,
     }
 
 
 def license_status() -> dict[str, Any]:
+    """Non-raising status probe."""
     try:
         return require_alive()
     except LicenseError as e:
-        return {"status": "dead", "reason": str(e)}
+        return {"status": "dead", "reason": str(e), "price": PRICE_USD, "purchase_url": PURCHASE_URL}
