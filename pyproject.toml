@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "json-chamber-sdk"
+version = "0.1.0"
+description = "Chamber – JSON sealing with φ-split keyword shares, 24-hour trial kill-switch, and VerifiedDR gate."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary – trial then unlock" }
+authors = [
+  { name = "Slid Phi Labs" }
+]
+keywords = ["chamber", "seal", "cloak", "json", "security", "trial"]
+dependencies = [
+  "cryptography>=42.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Homepage = "https://slidphilabs.com/chamber"
+Documentation = "https://slidphilabs.com/chamber"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["json_chamber*"]
