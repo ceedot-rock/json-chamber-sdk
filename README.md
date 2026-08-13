@@ -1,8 +1,19 @@
-# json-chamber-sdk
+# json-chamber
 
-**Chamber** – JSON sealing with φ-split keyword shares.
+**Chamber** — JSON sealing with φ-split keyword shares.
 
-No TRU8 compression engine. Pure security product from Slid Phi Labs.
+Pure security product from **Slid Phi Labs**. No TRU8 compression engine in this package.
+
+## Pricing — two SKUs, no conflict
+
+| Product | What it is | Price | License |
+|---------|------------|-------|---------|
+| **json-chamber** (this package) | Pure JSON cloaking — φ-split, AES-256-GCM, keyword shares | **$99 one-time / domain** | BSL-1.1 — 24h free eval, then hard kill |
+| **tru8-chamber** | TRU8 + chamber — smaller asset bundles + same cloaking | **$1,900 / project / year** | Proprietary — never open-sourced |
+
+**Funnel:** $99 indie impulse buy → studio upsell to $1,900 when they need compression + sealing.
+
+Chamber public unlock: https://www.slidphilabs.com/chamber
 
 ## Install
 
@@ -15,53 +26,27 @@ pip install -e .
 ```python
 from json_chamber import cloak_json, open_json
 
-# Lend this to ANY codebase – no TRU8 engine inside
-sealed = cloak_json({"api_key": "sk-...", "config": {...}})
-
-# They can store / ship this – but k_words alone is useless
-# {
-#   "k_words": "ward veil spire lock ...",
-#   "r_words": "oath cloak shard mark ...",
-#   "nonce": "...",
-#   "tag": "...",
-#   "ct": "..."
-# }
-
-# Only opens with both shares + master + VerifiedDR address
+sealed = cloak_json({"api_key": "sk-...", "level": "boss_fight", "hp": 100})
 original = open_json(sealed)
 ```
 
+## 24h hard kill
+
+- **0–24h:** fully functional
+- **24h00m01s:** writes `~/.chamber/KILLED` — all cloak/open bricked
+- **Unlock:** set `VERIFIEDDR_API_KEY=vdr_purchased_…` after $99 Stripe payment
+
 ## Format specification
 
-**[Chamber Format Spec v1](./CHAMBER-FORMAT-v1.md)** — wire format only
-(sealed object shape, φ-split, AES-256-GCM, keyword encoding).
-
-License enforcement, trial duration, and unlock are **out of scope** of the format.
-
-Suggested media type (informative): `application/chamber+json`.
-
-## Licensing
-
-**License:** [Business Source License 1.1](./LICENSE)  
-- Non-production use free under BSL 1.1  
-- Production use requires paid unlock (Additional Use Grant: None)  
-- Change Date: 2030-08-13 → Apache-2.0  
-- TRU8 compression engine is **not** in this package and is not licensed here
-
-### Runtime trial (orthogonal to BSL)
-
-- **24-hour evaluation** from first run (HMAC-signed license under `~/.chamber/`).
-- Hard cut at 24 h – no grace period. After that the chamber hard-kills.
-- Set `VERIFIEDDR_API_KEY` to a purchased key (`…purchased…` / `…pro…` / `…live_…`) for permanent unlock.
-- Tamper of the license file → instant kill.
+**[Chamber Format Spec v1](./CHAMBER-FORMAT-v1.md)** — wire format only.
 
 ## Environment
 
 | Variable | Purpose |
 |----------|---------|
 | `CHAMBER_MASTER_SECRET` | High-entropy master (preferred) |
-| `TRU8_MASTER_SECRET` | Fallback master name |
-| `VERIFIEDDR_API_KEY` | Gate + purchase signal |
+| `JSON_CHAMBER_MASTER` | Alias |
+| `VERIFIEDDR_API_KEY` | `vdr_purchased_…` = permanent unlock |
 
 ## API
 
@@ -69,21 +54,27 @@ Suggested media type (informative): `application/chamber+json`.
 |----------|-------------|
 | `cloak_json(obj)` | Seal any JSON-serialisable object |
 | `open_json(sealed)` | Open (requires live license) |
-| `cloak_bytes(data)` | Low-level binary seal |
-| `open_bytes(sealed)` | Low-level binary open |
+| `cloak_bytes` / `open_bytes` | Binary seal/open |
 | `license_status()` | Non-raising status probe |
-| `require_alive()` | Raise `LicenseError` if dead |
 
-## Design notes
+## Stripe unlock server
 
-- Message key is φ-split into two 16-byte shares, rendered as word lists.
-- AES-256-GCM with associated data `chamber-v1`.
-- Public integrity tag binds the two shares + nonce.
-- Master secret is required at open time even after share reconstruction (binds to licensed host).
+```bash
+pip install flask stripe
+export STRIPE_SECRET_KEY=sk_live_...
+export STRIPE_PRICE_ID=price_...
+export DOMAIN=https://www.slidphilabs.com
+export JSON_CHAMBER_MASTER=...
+python server/checkout_server.py
+```
+
+## License
+
+[Business Source License 1.1](./LICENSE) — Change Date 2030-08-13 → Apache-2.0.  
+TRU8 is **not** in this package.
 
 ## Links
 
-- Product page: https://www.slidphilabs.com/chamber
-- Format spec: [CHAMBER-FORMAT-v1.md](./CHAMBER-FORMAT-v1.md)
-- Unlock: $199 via Stripe (see product page)
-- Lab: [Slid Phi Labs](https://www.slidphilabs.com)
+- Product: https://www.slidphilabs.com/chamber
+- Format: [CHAMBER-FORMAT-v1.md](./CHAMBER-FORMAT-v1.md)
+- Contact: corey@slidphilabs.com
