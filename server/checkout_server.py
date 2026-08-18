@@ -1,27 +1,40 @@
 """
-Stripe Checkout Server — mints vdr_purchased_ keys after $99 json-chamber payment.
+Stripe Checkout + Entitlement Issuer for the shared Black Box control plane.
+
+Mints signed entitlement tokens (json-chamber format) after payment.
+Works for every product: json-chamber, tru8-chamber, chamber, trugame.
 
 Run:
   pip install flask stripe
   export STRIPE_SECRET_KEY=sk_live_...
   export STRIPE_WEBHOOK_SECRET=whsec_...
-  export STRIPE_PRICE_ID=price_...
+  export STRIPE_PRICE_ID=price_...          # default json-chamber $99
   export DOMAIN=https://www.slidphilabs.com
-  export JSON_CHAMBER_MASTER=...
+  export JSON_CHAMBER_MASTER=...            # HMAC secret (must match client)
   python server/checkout_server.py
 """
 
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import os
 import secrets
-import time
+import sys
+import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, request
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from json_chamber.license import (  # noqa: E402
+    PRODUCTS,
+    create_entitlement,
+    verify_entitlement,
+)
 
 app = Flask(__name__)
 
@@ -32,7 +45,7 @@ DOMAIN = os.getenv("DOMAIN", "https://www.slidphilabs.com").rstrip("/")
 MASTER_RAW = os.getenv("JSON_CHAMBER_MASTER") or os.getenv(
     "CHAMBER_MASTER_SECRET", "chamber-demo-master-secret-32b!!"
 )
-MASTER = MASTER_RAW.encode()
+MASTER = MASTER_RAW.encode() if isinstance(MASTER_RAW, str) else MASTER_RAW
 if len(MASTER) < 32:
     MASTER = hashlib.sha256(MASTER).digest()
 
@@ -56,40 +69,69 @@ def _save_db(db: dict) -> None:
     DB_PATH.write_text(json.dumps(db, indent=2), encoding="utf-8")
 
 
-def mint_license_key(email: str, domain: str = "", session_id: str = "") -> str:
-    ts = int(time.time())
-    rand = secrets.token_hex(8)
-    payload = f"{email}|{domain}|{session_id}|{ts}|{rand}"
-    sig = hmac.new(MASTER, payload.encode(), hashlib.sha256).hexdigest()[:24]
-    key = f"vdr_purchased_live_{rand}_{sig}"
+def mint_entitlement(
+    *,
+    product: str = "json-chamber",
+    email: str = "",
+    order_id: str = "",
+    permanent: bool | None = None,
+) -> dict:
+    meta = PRODUCTS.get(product, PRODUCTS["json-chamber"])
+    tier = meta["tier"]
+    if permanent is None:
+        permanent = tier == "one-time"
+    token = create_entitlement(
+        product=product,
+        order_id=order_id or f"ord_{secrets.token_hex(8)}",
+        email=email,
+        box_id=str(uuid.uuid4()),
+        tier=tier,
+        permanent=permanent,
+    )
+    verify_entitlement(token)
     db = _load_db()
+    key = token["box_id"]
     db[key] = {
+        "token": token,
         "email": email,
-        "domain": domain,
-        "session_id": session_id,
-        "ts": ts,
+        "order_id": order_id,
+        "product": product,
+        "tier": tier,
+        "issued": token["issued"],
         "active": True,
-        "product": "json-chamber",
-        "price_usd": 99,
+        "price_usd": meta.get("price_usd", 0),
     }
+    if order_id:
+        db[f"order:{order_id}"] = key
     _save_db(db)
-    return key
+    return token
 
 
 @app.route("/create-checkout-session", methods=["POST"])
 def create_checkout_session():
     if stripe is None or not STRIPE_SECRET_KEY:
         return jsonify({"error": "stripe not configured"}), 500
-    email = (request.json or {}).get("email", "")
+    body = request.json or {}
+    email = body.get("email", "")
+    product = body.get("product", "json-chamber")
+    if product not in PRODUCTS:
+        product = "json-chamber"
     session = stripe.checkout.Session.create(
         mode="payment",
         line_items=[{"price": PRICE_ID, "quantity": 1}],
-        success_url=f"{DOMAIN}/chamber?success=1&session_id={{CHECKOUT_SESSION_ID}}",
-        cancel_url=f"{DOMAIN}/chamber?canceled=1",
+        success_url=(
+            f"{DOMAIN}/access?product={product}"
+            f"&session={{CHECKOUT_SESSION_ID}}"
+        ),
+        cancel_url=f"{DOMAIN}/access?canceled=1&product={product}",
         customer_email=email or None,
-        metadata={"product": "json-chamber", "price_usd": "99"},
+        metadata={
+            "product": product,
+            "price_usd": str(PRODUCTS[product].get("price_usd", 99)),
+            "tier": PRODUCTS[product]["tier"],
+        },
     )
-    return jsonify({"url": session.url, "id": session.id})
+    return jsonify({"url": session.url, "id": session.id, "product": product})
 
 
 @app.route("/webhook", methods=["POST"])
@@ -107,22 +149,55 @@ def webhook():
             event = json.loads(payload)
     except Exception as e:
         return jsonify({"error": str(e)}), 400
-
     if event.get("type") == "checkout.session.completed":
         session = event["data"]["object"]
-        email = (session.get("customer_details") or {}).get("email") or session.get(
-            "customer_email"
-        ) or ""
-        domain = (session.get("metadata") or {}).get("domain", "")
-        key = mint_license_key(email, domain, session.get("id", ""))
-        print(f"MINTED KEY for {email}: {key}")
+        email = (
+            (session.get("customer_details") or {}).get("email")
+            or session.get("customer_email")
+            or ""
+        )
+        meta = session.get("metadata") or {}
+        product = meta.get("product", "json-chamber")
+        order_id = session.get("id", "")
+        token = mint_entitlement(product=product, email=email, order_id=order_id)
+        print(f"MINTED ENTITLEMENT for {email} product={product} box_id={token['box_id']}")
     return jsonify({"received": True})
 
 
-@app.route("/verify/<key>")
-def verify_key(key: str):
+@app.route("/entitlement/<box_id>")
+def get_entitlement(box_id: str):
     db = _load_db()
-    rec = db.get(key)
+    rec = db.get(box_id)
+    if not rec or not rec.get("active"):
+        return jsonify({"valid": False}), 404
+    return jsonify({"valid": True, "entitlement": rec["token"]})
+
+
+@app.route("/entitlement/by-order/<order_id>")
+def get_entitlement_by_order(order_id: str):
+    db = _load_db()
+    box_id = db.get(f"order:{order_id}")
+    if not box_id:
+        return jsonify({"valid": False}), 404
+    return get_entitlement(box_id)
+
+
+@app.route("/mint", methods=["POST"])
+def manual_mint():
+    body = request.json or {}
+    product = body.get("product", "json-chamber")
+    email = body.get("email", "")
+    order_id = body.get("order_id", f"manual_{secrets.token_hex(6)}")
+    if product not in PRODUCTS:
+        return jsonify({"error": f"unknown product {product}"}), 400
+    token = mint_entitlement(product=product, email=email, order_id=order_id)
+    return jsonify({"ok": True, "entitlement": token})
+
+
+@app.route("/verify/<box_id>")
+def verify_box(box_id: str):
+    db = _load_db()
+    rec = db.get(box_id)
     if not rec or not rec.get("active"):
         return jsonify({"valid": False})
     return jsonify(
@@ -130,18 +205,27 @@ def verify_key(key: str):
             "valid": True,
             "purchased": True,
             "email": rec.get("email"),
-            "domain": rec.get("domain"),
-            "product": rec.get("product", "json-chamber"),
+            "product": rec.get("product"),
+            "tier": rec.get("tier"),
+            "order_id": rec.get("order_id"),
         }
     )
 
 
 @app.route("/health")
 def health():
-    return jsonify({"ok": True, "product": "json-chamber", "price_usd": 99})
+    return jsonify(
+        {
+            "ok": True,
+            "control_plane": "json-chamber",
+            "products": list(PRODUCTS.keys()),
+            "version": "1.2.0",
+        }
+    )
 
 
 if __name__ == "__main__":
-    print("Stripe license server on :4242")
+    print("Black Box entitlement server on :4242")
+    print("Products:", ", ".join(PRODUCTS))
     print("Set STRIPE_SECRET_KEY, STRIPE_PRICE_ID, DOMAIN, JSON_CHAMBER_MASTER")
     app.run(port=4242, debug=False)
