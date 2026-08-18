@@ -1,14 +1,20 @@
 """
-Chamber license – 24-hour eval kill-switch + purchase unlock.
+json-chamber shared control plane — Black Box license + killswitch + entitlement.
 
-Tiered product line (Slid Phi Labs):
-  json-chamber  – $99 one-time / domain (this package, BSL-1.1)
-  tru8-chamber  – $1,900 / project / year (proprietary; not in this repo)
+Policy (locked 2026-08-18):
+  • All products use this module: json-chamber, tru8-chamber, chamber, trugame, …
+  • Trial: hard 24 hours from first activation → box turns OFF
+  • After trial: stays OFF until payment for that specific box
+  • After payment: turns ON for the purchased period
+  • Offline after payment:
+      - one-time ($99): 24 h grace after last successful check, then re-check
+        (first successful post-pay check can also mark permanent)
+      - time-limited / project-year: 30-day lease, then off until renew
+  • Integrity: HMAC signature on license + entitlement; optional benefit_check
+  • Payment gate: Stripe (or manual token from corey@slidphilabs.com)
 
-- First run writes a signed license.json under ~/.chamber/
-- After 24 hours (hard cut, no grace) the box hard-kills unless purchased
-- Any tamper of the license file → immediate kill
-- VERIFIEDDR_API_KEY containing purchased / pro / live_ unlocks permanently
+States:
+  eval → expired/killed → entitled (one-time or lease) → (lease end / grace end) → killed
 """
 
 from __future__ import annotations
@@ -18,25 +24,35 @@ import hmac
 import json
 import os
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
 LICENSE_DIR = Path.home() / ".chamber"
 LICENSE_FILE = LICENSE_DIR / "license.json"
 KILL_FILE = LICENSE_DIR / "KILLED"
+ENTITLEMENT_FILE = LICENSE_DIR / "entitlement.json"
 
-EVAL_DAYS = 1
-GRACE_HOURS = 0
+TRIAL_SECONDS = 24 * 3600
+ONE_TIME_GRACE_SECONDS = 24 * 3600
+LEASE_SECONDS = 30 * 86400
 
 PURCHASE_URL = os.environ.get(
     "CHAMBER_PURCHASE_URL",
-    "https://www.slidphilabs.com/chamber",
+    "https://www.slidphilabs.com/access",
 )
-PRICE_USD = 99
+SUPPORT_EMAIL = "corey@slidphilabs.com"
+
+PRODUCTS: dict[str, dict[str, Any]] = {
+    "json-chamber": {"price_usd": 99, "tier": "one-time", "label": "json-chamber (Black Box)"},
+    "tru8-chamber": {"price_usd": 1900, "tier": "project-year", "label": "tru8-chamber"},
+    "chamber": {"price_usd": 0, "tier": "one-time", "label": "Chamber (security product)"},
+    "trugame": {"price_usd": 0, "tier": "one-time", "label": "TruGame engine"},
+}
 
 
 class LicenseError(RuntimeError):
-    """Raised when the chamber is dead, expired, or tampered."""
+    """Raised when the chamber is dead, expired, tampered, or not entitled."""
 
 
 def _master_bytes() -> bytes:
@@ -45,7 +61,7 @@ def _master_bytes() -> bytes:
         or os.environ.get("JSON_CHAMBER_MASTER")
         or os.environ.get("TRU8_MASTER_SECRET", "chamber-demo-master-secret-32b!!")
     )
-    b = raw.encode("utf-8")
+    b = raw.encode("utf-8") if isinstance(raw, str) else raw
     if len(b) < 32:
         b = hashlib.sha256(b).digest()
     return b
@@ -56,104 +72,273 @@ def _sign(payload: dict[str, Any]) -> str:
     return hmac.new(_master_bytes(), msg, hashlib.sha256).hexdigest()
 
 
+def _verify_sig(data: dict[str, Any]) -> bool:
+    sig = data.get("sig")
+    if not sig:
+        return False
+    body = {k: v for k, v in data.items() if k != "sig"}
+    return hmac.compare_digest(sig, _sign(body))
+
+
 def _ensure_dir() -> None:
     LICENSE_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _device_fingerprint() -> str:
+    parts = [
+        str(Path.home()),
+        os.environ.get("USER", ""),
+        os.environ.get("HOSTNAME", os.environ.get("COMPUTERNAME", "")),
+    ]
+    return hashlib.sha256("|".join(parts).encode()).hexdigest()[:24]
+
+
+def create_entitlement(
+    *,
+    product: str = "json-chamber",
+    order_id: str = "",
+    email: str = "",
+    box_id: str | None = None,
+    tier: str | None = None,
+    lease_seconds: int | None = None,
+    grace_seconds: int | None = None,
+    permanent: bool = False,
+) -> dict[str, Any]:
+    meta = PRODUCTS.get(product, PRODUCTS["json-chamber"])
+    tier = tier or meta["tier"]
+    now = int(time.time())
+    if lease_seconds is None:
+        lease_seconds = 0 if tier == "one-time" else LEASE_SECONDS
+    if grace_seconds is None:
+        grace_seconds = ONE_TIME_GRACE_SECONDS if tier == "one-time" else LEASE_SECONDS
+    token: dict[str, Any] = {
+        "v": 1,
+        "type": "entitlement",
+        "product": product,
+        "box_id": box_id or str(uuid.uuid4()),
+        "tier": tier,
+        "issued": now,
+        "expires": None if (tier == "one-time" or permanent) else now + lease_seconds,
+        "lease_seconds": lease_seconds,
+        "grace_seconds": grace_seconds,
+        "permanent": bool(permanent or tier == "one-time"),
+        "order_id": order_id,
+        "email": email,
+        "price_usd": meta.get("price_usd", 0),
+    }
+    token["sig"] = _sign(token)
+    return token
+
+
+def verify_entitlement(token: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(token, dict) or token.get("type") != "entitlement":
+        raise LicenseError("invalid entitlement: not an entitlement object")
+    if token.get("v") != 1:
+        raise LicenseError("invalid entitlement: unsupported version")
+    if not _verify_sig(token):
+        raise LicenseError("invalid entitlement: signature mismatch — possible tamper")
+    return token
+
+
+def _kill(reason: str) -> None:
+    _ensure_dir()
+    KILL_FILE.write_text(reason, encoding="utf-8")
+
+
+def _load_or_create(product: str = "json-chamber") -> dict[str, Any]:
+    _ensure_dir()
+    if KILL_FILE.exists():
+        raise LicenseError(
+            f"Chamber hard-killed ({KILL_FILE.read_text(encoding='utf-8').strip()}). "
+            f"Pay to re-enable → {PURCHASE_URL} or email {SUPPORT_EMAIL}"
+        )
+    if LICENSE_FILE.exists():
+        try:
+            data = json.loads(LICENSE_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            _kill("tamper-parse")
+            raise LicenseError(f"license file unreadable – killed: {e}") from e
+        if not _verify_sig(data):
+            _kill("tamper-sig")
+            raise LicenseError("license signature mismatch – killed")
+        return {k: v for k, v in data.items() if k != "sig"}
+    now = int(time.time())
+    box_id = str(uuid.uuid4())
+    lic = {
+        "v": 1,
+        "type": "eval",
+        "product": product,
+        "box_id": box_id,
+        "first_run": now,
+        "eval_expires": now + TRIAL_SECONDS,
+        "purchased": False,
+        "tier": "eval",
+        "device_hash": _device_fingerprint(),
+        "last_check": now,
+    }
+    _write_license(lic)
+    return lic
+
+
+def _write_license(lic: dict[str, Any]) -> None:
+    _ensure_dir()
+    body = {k: v for k, v in lic.items() if k != "sig"}
+    body["sig"] = _sign(body)
+    LICENSE_FILE.write_text(json.dumps(body, indent=2), encoding="utf-8")
+
+
+def apply_entitlement(token: dict[str, Any] | str) -> dict[str, Any]:
+    if isinstance(token, str):
+        token = json.loads(token)
+    token = verify_entitlement(token)
+    _ensure_dir()
+    if KILL_FILE.exists():
+        KILL_FILE.unlink()
+    now = int(time.time())
+    meta = PRODUCTS.get(token["product"], PRODUCTS["json-chamber"])
+    lic = {
+        "v": 1,
+        "type": "entitled",
+        "product": token["product"],
+        "box_id": token.get("box_id") or str(uuid.uuid4()),
+        "first_run": now,
+        "eval_expires": 0,
+        "purchased": True,
+        "tier": token.get("tier") or meta["tier"],
+        "device_hash": _device_fingerprint(),
+        "last_check": now,
+        "entitlement_issued": token.get("issued", now),
+        "entitlement_expires": token.get("expires"),
+        "lease_seconds": token.get("lease_seconds", 0),
+        "grace_seconds": token.get("grace_seconds", ONE_TIME_GRACE_SECONDS),
+        "permanent": bool(token.get("permanent")),
+        "order_id": token.get("order_id", ""),
+        "email": token.get("email", ""),
+        "price_usd": token.get("price_usd", meta.get("price_usd", 0)),
+    }
+    _write_license(lic)
+    ENTITLEMENT_FILE.write_text(json.dumps(token, indent=2), encoding="utf-8")
+    return {
+        "status": "entitled",
+        "license": lic,
+        "product": lic["product"],
+        "tier": lic["tier"],
+        "permanent": lic["permanent"],
+        "expires": lic["entitlement_expires"],
+    }
+
+
+def require_alive(product: str = "json-chamber") -> dict[str, Any]:
+    if KILL_FILE.exists():
+        reason = KILL_FILE.read_text(encoding="utf-8").strip()
+        raise LicenseError(
+            f"Chamber hard-killed ({reason}). "
+            f"Payment required → {PURCHASE_URL} or {SUPPORT_EMAIL}"
+        )
+    lic = _load_or_create(product)
+    now = int(time.time())
+    if lic.get("purchased"):
+        if lic.get("permanent"):
+            last = int(lic.get("last_check", now))
+            grace = int(lic.get("grace_seconds", ONE_TIME_GRACE_SECONDS))
+            if now - last > grace:
+                lic["last_check"] = now
+                lic["recheck_due"] = True
+                _write_license(lic)
+            return {
+                "license": lic,
+                "status": "purchased",
+                "product": lic.get("product", product),
+                "tier": lic.get("tier", "one-time"),
+                "permanent": True,
+                "price": lic.get("price_usd", 99),
+            }
+        expires = lic.get("entitlement_expires")
+        if expires is not None and now > int(expires):
+            _kill("lease-expired")
+            raise LicenseError(
+                f"{lic.get('product', product)} lease ended. "
+                f"Renew → {PURCHASE_URL} or email {SUPPORT_EMAIL}"
+            )
+        lic["last_check"] = now
+        _write_license(lic)
+        remaining = max(0, int(expires) - now) if expires else None
+        return {
+            "license": lic,
+            "status": "leased",
+            "product": lic.get("product", product),
+            "tier": lic.get("tier", "project-year"),
+            "seconds_remaining": remaining,
+            "price": lic.get("price_usd", 1900),
+        }
+    gate = verifieddr_check()
+    if gate.get("purchased"):
+        token = create_entitlement(
+            product=gate.get("tier", product) if gate.get("tier") in PRODUCTS else product,
+            order_id="env-key",
+            email="",
+            permanent=True,
+        )
+        return apply_entitlement(token)
+    expires = int(lic.get("eval_expires", 0))
+    if now > expires:
+        _kill("trial-expired")
+        raise LicenseError(
+            f"24h Black Box trial ended for {lic.get('product', product)}. "
+            f"Box is OFF until payment. "
+            f"Unlock → {PURCHASE_URL} or email {SUPPORT_EMAIL} subject PACKAGE ACCESS"
+        )
+    remaining = max(0, expires - now)
+    return {
+        "license": lic,
+        "status": "eval",
+        "product": lic.get("product", product),
+        "seconds_remaining": remaining,
+        "price": PRODUCTS.get(product, PRODUCTS["json-chamber"]).get("price_usd", 99),
+        "purchase_url": PURCHASE_URL,
+    }
+
+
+def license_status(product: str = "json-chamber") -> dict[str, Any]:
+    try:
+        return require_alive(product)
+    except LicenseError as e:
+        return {
+            "status": "dead",
+            "reason": str(e),
+            "product": product,
+            "purchase_url": PURCHASE_URL,
+            "support": SUPPORT_EMAIL,
+        }
+
+
 def verifieddr_check() -> dict[str, Any]:
-    """Env-key driven gate. Missing key = open-source eval allowed."""
     key = os.environ.get("VERIFIEDDR_API_KEY", "")
     if not key:
         return {
             "verified": True,
-            "reason": "open-source eval (no VERIFIEDDR_API_KEY)",
+            "reason": "open eval (no VERIFIEDDR_API_KEY)",
             "purchased": False,
             "eval_mode": True,
             "tier": "json-chamber",
         }
     purchased = any(tok in key for tok in ("purchased", "pro", "live_"))
-    tru8 = "tru8" in key.lower()
+    product = "tru8-chamber" if "tru8" in key.lower() else "json-chamber"
+    if "trugame" in key.lower():
+        product = "trugame"
+    if "chamber" in key.lower() and "json" not in key.lower() and "tru8" not in key.lower():
+        product = "chamber"
     return {
         "verified": True,
         "reason": "ok",
         "purchased": purchased,
         "eval_mode": not purchased,
-        "tier": "tru8-chamber" if tru8 else "json-chamber",
+        "tier": product,
         "app_id": "chamber",
     }
 
 
-def _load_or_create() -> dict[str, Any]:
-    _ensure_dir()
-    if KILL_FILE.exists():
-        raise LicenseError("Chamber hard-killed (KILLED marker present)")
-
-    if LICENSE_FILE.exists():
-        try:
-            data = json.loads(LICENSE_FILE.read_text(encoding="utf-8"))
-        except Exception as e:
-            KILL_FILE.write_text("tamper-parse", encoding="utf-8")
-            raise LicenseError(f"license file unreadable – killed: {e}") from e
-
-        sig = data.pop("sig", None)
-        if not sig or not hmac.compare_digest(sig, _sign(data)):
-            KILL_FILE.write_text("tamper-sig", encoding="utf-8")
-            raise LicenseError("license signature mismatch – killed")
-        return data
-
-    now = int(time.time())
-    lic = {
-        "type": "eval",
-        "product": "json-chamber",
-        "first_run": now,
-        "eval_expires": now + EVAL_DAYS * 86400,
-        "purchased": False,
-        "device_hash": hashlib.sha256(str(Path.home()).encode()).hexdigest()[:16],
-    }
-    signed = dict(lic)
-    signed["sig"] = _sign(lic)
-    LICENSE_FILE.write_text(json.dumps(signed, indent=2), encoding="utf-8")
-    return lic
-
-
-def require_alive() -> dict[str, Any]:
-    """Call on every cloak/open. Raises LicenseError if dead."""
-    if KILL_FILE.exists():
-        raise LicenseError(
-            f"Chamber hard-killed. json-chamber unlock: ${PRICE_USD} → {PURCHASE_URL}"
-        )
-
-    lic = _load_or_create()
-    gate = verifieddr_check()
-
-    if gate.get("purchased") or lic.get("purchased"):
-        lic["purchased"] = True
-        return {"license": lic, "gate": gate, "status": "purchased", "price": PRICE_USD}
-
-    now = int(time.time())
-    expires = int(lic.get("eval_expires", 0))
-    if now > expires + GRACE_HOURS * 3600:
-        KILL_FILE.write_text("expired", encoding="utf-8")
-        raise LicenseError(
-            f"json-chamber 24h eval ended. "
-            f"Price ${PRICE_USD} one-time → {PURCHASE_URL} "
-            f"(or set VERIFIEDDR_API_KEY=vdr_purchased_…)"
-        )
-
-    remaining = max(0, expires - now)
-    return {
-        "license": lic,
-        "gate": gate,
-        "status": "eval",
-        "seconds_remaining": remaining,
-        "price": PRICE_USD,
-        "purchase_url": PURCHASE_URL,
-    }
-
-
-def license_status() -> dict[str, Any]:
-    """Non-raising status probe."""
-    try:
-        return require_alive()
-    except LicenseError as e:
-        return {"status": "dead", "reason": str(e), "price": PRICE_USD, "purchase_url": PURCHASE_URL}
+def reset_for_testing() -> None:
+    for p in (LICENSE_FILE, KILL_FILE, ENTITLEMENT_FILE):
+        if p.exists():
+            p.unlink()
