@@ -26,12 +26,12 @@ def _master() -> bytes:
 
 
 def cloak_bytes(data: bytes) -> dict:
-    require_alive()
+    require_alive("json-chamber")
     return core.seal(data, _master())
 
 
 def open_bytes(sealed: dict) -> bytes:
-    require_alive()
+    require_alive("json-chamber")
     return core.open_sealed(sealed, _master())
 
 
