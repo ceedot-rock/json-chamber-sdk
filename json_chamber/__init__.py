@@ -1,7 +1,8 @@
-"""json-chamber — pure JSON sealing + shared Black Box control plane.
+"""json-chamber — JSON sealing protocol.
 
-All products (json-chamber, tru8-chamber, chamber, trugame) use the same
-license / killswitch / entitlement layer defined in .license.
+Cloak (seal new JSON) requires a live cloak license.
+Open of an already-sealed blob is keys-only: no license, no clock.
+TruGame and other engines still use require_alive() as a running-engine gate.
 """
 
 from .api import cloak_json, open_json, cloak_bytes, open_bytes
@@ -13,6 +14,7 @@ from .license import (
     create_entitlement,
     license_status,
     require_alive,
+    require_cloak,
     reset_for_testing,
     verifieddr_check,
     verify_entitlement,
@@ -39,6 +41,7 @@ __all__ = [
     "LicenseError",
     "PRODUCTS",
     "require_alive",
+    "require_cloak",
     "license_status",
     "apply_entitlement",
     "create_entitlement",
@@ -55,4 +58,4 @@ __all__ = [
     "chunk_dedup",
     "benefit_report",
 ]
-__version__ = "1.2.0"
+__version__ = "1.3.0"

@@ -1,20 +1,19 @@
 """
-json-chamber shared control plane — Black Box license + killswitch + entitlement.
+json-chamber shared control plane — cloak license + entitlement.
 
-Policy (locked 2026-08-18):
-  • All products use this module: json-chamber, tru8-chamber, chamber, trugame, …
-  • Trial: hard 24 hours from first activation → box turns OFF
-  • After trial: stays OFF until payment for that specific box
-  • After payment: turns ON for the purchased period
-  • Offline after payment:
-      - one-time ($99): 24 h grace after last successful check, then re-check
-        (first successful post-pay check can also mark permanent)
-      - time-limited / project-year: 30-day lease, then off until renew
-  • Integrity: HMAC signature on license + entitlement; optional benefit_check
-  • Payment gate: Stripe (or manual token from corey@slidphilabs.com)
+Policy (2026-09-02):
+  • Chamber is a protocol for storing a JSON secret. Ciphertext does not expire.
+  • What you sell is a **cloak license** (right to seal *new* JSON for a term).
+  • **open()** of an already-sealed blob is both keys, no extra payment, no clock.
+  • Trial: 24 hours of cloak from first activation.
+  • After trial: cloak refuses until a month ($9) or year ($99) license is applied.
+  • TruGame / other engines still use require_alive() as a running-engine gate.
+  • Integrity: HMAC signature on license + entitlement.
+  • Payment gate: Stripe / x402 / invoice (corey@slidphilabs.com)
 
-States:
-  eval → expired/killed → entitled (one-time or lease) → (lease end / grace end) → killed
+Chamber states (cloak only):
+  eval → cloak-expired → entitled (lease) → (lease end) → cloak-expired
+Open is never killed by this module.
 """
 
 from __future__ import annotations
@@ -44,10 +43,11 @@ PURCHASE_URL = os.environ.get(
 SUPPORT_EMAIL = "corey@slidphilabs.com"
 
 PRODUCTS: dict[str, dict[str, Any]] = {
-    "json-chamber": {"price_usd": 99, "tier": "one-time", "label": "json-chamber (Black Box)"},
-    "tru8-chamber": {"price_usd": 1900, "tier": "project-year", "label": "tru8-chamber"},
-    "chamber": {"price_usd": 0, "tier": "one-time", "label": "Chamber (security product)"},
-    "trugame": {"price_usd": 0, "tier": "one-time", "label": "TruGame engine"},
+    "json-chamber": {"price_usd": 99, "tier": "year", "label": "Chamber annual cloak license"},
+    "chamber": {"price_usd": 99, "tier": "year", "label": "Chamber annual cloak license"},
+    "chamber-month": {"price_usd": 9, "tier": "month", "label": "Chamber monthly cloak license"},
+    "chamber-year": {"price_usd": 99, "tier": "year", "label": "Chamber annual cloak license"},
+    "trugame": {"price_usd": 79, "tier": "year", "label": "TruGame engine"},
 }
 
 
@@ -228,6 +228,11 @@ def apply_entitlement(token: dict[str, Any] | str) -> dict[str, Any]:
     }
 
 
+def require_cloak(product: str = "json-chamber") -> dict[str, Any]:
+    """Gate for *sealing new JSON*. Open does not call this."""
+    return require_alive(product)
+
+
 def require_alive(product: str = "json-chamber") -> dict[str, Any]:
     if KILL_FILE.exists():
         reason = KILL_FILE.read_text(encoding="utf-8").strip()
@@ -284,9 +289,10 @@ def require_alive(product: str = "json-chamber") -> dict[str, Any]:
     if now > expires:
         _kill("trial-expired")
         raise LicenseError(
-            f"24h Black Box trial ended for {lic.get('product', product)}. "
-            f"Box is OFF until payment. "
-            f"Unlock → {PURCHASE_URL} or email {SUPPORT_EMAIL} subject PACKAGE ACCESS"
+            f"24h cloak try ended for {lic.get('product', product)}. "
+            f"Sealing new JSON is off until a cloak license is live. "
+            f"Already-sealed blobs still open with both keys. "
+            f"Cloak license → {PURCHASE_URL} or email {SUPPORT_EMAIL}"
         )
     remaining = max(0, expires - now)
     return {

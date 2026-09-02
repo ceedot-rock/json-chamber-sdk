@@ -10,7 +10,7 @@ import os
 from typing import Any
 
 from . import core
-from .license import require_alive
+from .license import require_cloak
 
 
 def _master() -> bytes:
@@ -26,12 +26,13 @@ def _master() -> bytes:
 
 
 def cloak_bytes(data: bytes) -> dict:
-    require_alive("json-chamber")
+    """Seal bytes. Requires a live cloak license (24h try, then month/year)."""
+    require_cloak("json-chamber")
     return core.seal(data, _master())
 
 
 def open_bytes(sealed: dict) -> bytes:
-    require_alive("json-chamber")
+    """Open a sealed blob. Keys only — no license, no clock, no kill switch."""
     return core.open_sealed(sealed, _master())
 
 

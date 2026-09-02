@@ -1,22 +1,22 @@
 # json-chamber
 
-**Chamber** — JSON sealing with two independent keys.
+**Chamber** — a protocol for storing a JSON secret. Two independent keys. Ciphertext does not expire.
 
-Pure security product from **Slid Phi Labs**. No TRU8 engine in this package.
+Pure security product from **Slid Phi Labs**. No compressor engine in this package.
 
-## Pricing
+## What you buy
 
-Live seats on https://www.slidphilabs.com/chamber
+A **cloak license** — the right to seal *new* JSON for a term.
 
-| Product | What it is | Price |
-|---------|------------|-------|
-| **Chamber** (this package) | Seal / open JSON | **$49 / month · $490 / year** |
-| 24-hour try | Full cloak/open, then it stops | Free |
+| SKU | What it is | Price |
+|-----|------------|-------|
+| 24-hour try | cloak new JSON | Free |
+| Chamber month | cloak license | **$9 / month** |
+| Chamber year | cloak license | **$99 / year** |
 
-Not a $99 one-time SKU. Not a $1,900 compressor bundle.
-TRU8 is a separate tool on the site. Chamber Year does not include TRU8.
+**Open** of an already-sealed blob is both keys, no extra payment, no clock. If the license lapses you cannot seal new JSON; you can still open what you already sealed.
 
-Unlock: https://www.slidphilabs.com/chamber
+Live checkout: https://www.slidphilabs.com/chamber
 
 ## Install
 
@@ -30,13 +30,15 @@ pip install -e .
 from json_chamber import cloak_json, open_json
 
 sealed = cloak_json({"api_key": "sk-...", "level": "boss_fight", "hp": 100})
-original = open_json(sealed)
+original = open_json(sealed)  # keys only — works even after the cloak license ends
 ```
 
-## 24h try
+## License gate
 
-- **0–24h:** cloak/open work
-- After that: operational calls refuse until a Chamber seat is live
+- `cloak_json` / `cloak_bytes` → `require_cloak()` (24h try, then month/year)
+- `open_json` / `open_bytes` → keys only. Never killed by the license clock.
+
+TruGame and other running engines still call `require_alive()` for themselves. That is not Chamber storage.
 
 ## Format
 
@@ -45,7 +47,7 @@ original = open_json(sealed)
 ## License
 
 [Business Source License 1.1](./LICENSE) — Change Date **2030-08-13** → Apache-2.0.
-**TRU8 is not in this package.**
+**No compressor engine in this package.**
 
 ## Links
 
