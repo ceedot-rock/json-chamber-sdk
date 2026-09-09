@@ -32,6 +32,7 @@ _WORDS: tuple[str, ...] = (
 )
 
 assert len(_WORDS) == 64
+WORDLIST = _WORDS
 
 # φ ≈ 1.6180339887 – used for a deterministic bit rotation amount
 _PHI_ROT = 21  # round(32 * (φ - 1)) ≈ 19.4 → pick 21 for nice mix
@@ -101,11 +102,14 @@ def _derive_session_key(master: bytes, salt: bytes = b"chamber-phi-v1") -> bytes
     return hashlib.pbkdf2_hmac("sha256", master, salt, iterations=120_000, dklen=32)
 
 
+def _bind_key(msg_key: bytes, ct: bytes) -> bytes:
+    """AONT bind: message key XOR repeating SHA-256 of ciphertext."""
+    h = hashlib.sha256(ct).digest()
+    return bytes(msg_key[i] ^ h[i % 32] for i in range(32))
+
+
 def seal(plaintext: bytes, master: bytes) -> dict:
-    """
-    Produce a shippable sealed dict.
-    Both k_words and r_words are required later; either alone is useless.
-    """
+    """v1 seal — both word lists required. Kept so already-sealed blobs still open."""
     session = _derive_session_key(master)
     msg_key = os.urandom(32)
     k, r = _phi_split(msg_key)
@@ -115,6 +119,7 @@ def seal(plaintext: bytes, master: bytes) -> dict:
     ct = aesgcm.encrypt(nonce, plaintext, associated_data=b"chamber-v1")
 
     tag = hashlib.sha256(k + r + nonce).digest()[:16]
+    _ = session
 
     return {
         "v": 1,
@@ -128,27 +133,65 @@ def seal(plaintext: bytes, master: bytes) -> dict:
     }
 
 
-def open_sealed(sealed: dict, master: bytes) -> bytes:
-    """Reconstruct key from both word lists and decrypt."""
-    if sealed.get("v") != 1:
-        raise ValueError(f"unsupported chamber version: {sealed.get('v')}")
-    if sealed.get("algo") != "chamber-aes256gcm-phi":
-        raise ValueError("algo mismatch")
+def seal_aont(plaintext: bytes, master: bytes) -> dict:
+    """v2: encrypt, bind the key to the ciphertext, then φ-split the bound key.
 
-    k = _words_to_bytes(sealed["k_words"], 16)
-    r = _words_to_bytes(sealed["r_words"], 16)
-
-    nonce = bytes.fromhex(sealed["nonce"])
-    expected_tag = hashlib.sha256(k + r + nonce).digest()[:16]
-    if not hmac_compare(expected_tag, bytes.fromhex(sealed["tag"])):
-        raise ValueError("share integrity tag mismatch – possible tamper")
-
-    msg_key = _phi_join(k, r)
+    One share plus the blob is not enough to recover the message key.
+    Lab-owned AONT, not a Shamir library wrap.
+    """
     _ = _derive_session_key(master)
-
+    msg_key = os.urandom(32)
     aesgcm = AESGCM(msg_key)
-    ct = bytes.fromhex(sealed["ct"])
-    return aesgcm.decrypt(nonce, ct, associated_data=b"chamber-v1")
+    nonce = os.urandom(12)
+    ct = aesgcm.encrypt(nonce, plaintext, associated_data=b"chamber-v2")
+    package_key = _bind_key(msg_key, ct)
+    k, r = _phi_split(package_key)
+    tag = hashlib.sha256(k + r + nonce + ct[:16]).digest()[:16]
+    return {
+        "v": 2,
+        "algo": "chamber-aes256gcm-phi-aont",
+        "k_words": _bytes_to_words(k),
+        "r_words": _bytes_to_words(r),
+        "nonce": nonce.hex(),
+        "tag": tag.hex(),
+        "ct": ct.hex(),
+        "orig_len": len(plaintext),
+    }
+
+
+def open_sealed(sealed: dict, master: bytes) -> bytes:
+    """Reconstruct key from both word lists and decrypt. v1 and v2."""
+    ver = sealed.get("v")
+    if ver == 1:
+        if sealed.get("algo") != "chamber-aes256gcm-phi":
+            raise ValueError("algo mismatch")
+        k = _words_to_bytes(sealed["k_words"], 16)
+        r = _words_to_bytes(sealed["r_words"], 16)
+        nonce = bytes.fromhex(sealed["nonce"])
+        expected_tag = hashlib.sha256(k + r + nonce).digest()[:16]
+        if not hmac_compare(expected_tag, bytes.fromhex(sealed["tag"])):
+            raise ValueError("share integrity tag mismatch – possible tamper")
+        msg_key = _phi_join(k, r)
+        _ = _derive_session_key(master)
+        aesgcm = AESGCM(msg_key)
+        ct = bytes.fromhex(sealed["ct"])
+        return aesgcm.decrypt(nonce, ct, associated_data=b"chamber-v1")
+    if ver == 2:
+        if sealed.get("algo") != "chamber-aes256gcm-phi-aont":
+            raise ValueError("algo mismatch")
+        k = _words_to_bytes(sealed["k_words"], 16)
+        r = _words_to_bytes(sealed["r_words"], 16)
+        nonce = bytes.fromhex(sealed["nonce"])
+        ct = bytes.fromhex(sealed["ct"])
+        expected_tag = hashlib.sha256(k + r + nonce + ct[:16]).digest()[:16]
+        if not hmac_compare(expected_tag, bytes.fromhex(sealed["tag"])):
+            raise ValueError("share integrity tag mismatch – possible tamper")
+        package_key = _phi_join(k, r)
+        msg_key = _bind_key(package_key, ct)
+        _ = _derive_session_key(master)
+        aesgcm = AESGCM(msg_key)
+        return aesgcm.decrypt(nonce, ct, associated_data=b"chamber-v2")
+    raise ValueError(f"unsupported chamber version: {ver}")
 
 
 def hmac_compare(a: bytes, b: bytes) -> bool:

@@ -28,7 +28,7 @@ def _master() -> bytes:
 def cloak_bytes(data: bytes) -> dict:
     """Seal bytes. Requires a live cloak license (24h try, then month/year)."""
     require_cloak("json-chamber")
-    return core.seal(data, _master())
+    return core.seal_aont(data, _master())
 
 
 def open_bytes(sealed: dict) -> bytes:
