@@ -58,4 +58,4 @@ __all__ = [
     "chunk_dedup",
     "benefit_report",
 ]
-__version__ = "1.3.0"
+__version__ = "1.4.0"
