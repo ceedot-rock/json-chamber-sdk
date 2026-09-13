@@ -21,8 +21,10 @@ Live checkout: https://www.slidphilabs.com/chamber
 ## Install
 
 ```bash
-pip install -e .
+pip install json-chamber
 ```
+
+Editable (lab): `pip install -e .`
 
 ## Quick start
 
