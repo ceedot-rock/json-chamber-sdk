@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "json-chamber"
-version = "1.4.0"
+version = "1.4.1"
 description = "Chamber JSON sealing — φ-split keyword shares. Cloak license $9/mo · $99/yr. Open is keys-only; ciphertext does not expire."
 readme = "README.md"
 requires-python = ">=3.10"

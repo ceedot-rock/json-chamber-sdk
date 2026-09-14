@@ -31,7 +31,7 @@ Editable (lab): `pip install -e .`
 ```python
 from json_chamber import cloak_json, open_json
 
-sealed = cloak_json({"api_key": "sk-...", "level": "boss_fight", "hp": 100})
+sealed = cloak_json({"api_key": "sk-live-...", "webhook": "https://example.com/hook"})
 original = open_json(sealed)  # keys only — works even after the cloak license ends
 ```
 
@@ -39,8 +39,6 @@ original = open_json(sealed)  # keys only — works even after the cloak license
 
 - `cloak_json` / `cloak_bytes` → `require_cloak()` (24h try, then month/year)
 - `open_json` / `open_bytes` → keys only. Never killed by the license clock.
-
-TruGame and other running engines still call `require_alive()` for themselves. That is not Chamber storage.
 
 ## Format
 

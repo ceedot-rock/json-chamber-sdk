@@ -1,7 +1,7 @@
 from json_chamber import cloak_json, open_json
 
 # 1. Cloak
-payload = {"api_key": "sk-secret", "level": "boss_fight", "hp": 100}
+payload = {"api_key": "sk-live-...", "webhook": "https://example.com/hook"}
 sealed = cloak_json(payload)
 print("SEALED:", sealed["k_words"][:60], "...")
 
