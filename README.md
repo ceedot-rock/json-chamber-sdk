@@ -1,5 +1,8 @@
 # json-chamber
 
+[![Audited checks](https://github.com/ceedot-rock/json-chamber-sdk/actions/workflows/audited-checks.yml/badge.svg)](https://github.com/ceedot-rock/json-chamber-sdk/actions/workflows/audited-checks.yml)
+[![License](https://img.shields.io/badge/license-AGPL--3.0--or--later%20%7C%20Commercial-blue.svg)](LICENSE)
+
 **Chamber** — a protocol for storing a JSON secret. Two independent keys. Ciphertext does not expire.
 
 Pure security product from **Slid Phi Labs**. No compressor engine in this package.
@@ -46,7 +49,7 @@ original = open_json(sealed)  # keys only — works even after the cloak license
 
 ## License
 
-[Business Source License 1.1](./LICENSE) — Change Date **2030-08-13** → Apache-2.0.
+Dual-licensed: **AGPL-3.0-or-later OR Slid Phi Labs Commercial License** — see [LICENSE](./LICENSE).
 **No compressor engine in this package.**
 
 ## Links
