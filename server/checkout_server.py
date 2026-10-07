@@ -212,6 +212,33 @@ def verify_box(box_id: str):
     )
 
 
+@app.route("/")
+def about():
+    """Service descriptor: what this server is and every endpoint it offers."""
+    return jsonify(
+        {
+            "service": "json-chamber-entitlement-server",
+            "about": (
+                "Stripe Checkout + entitlement issuer for the shared Black Box "
+                "control plane (Chamber JSON sealing)."
+            ),
+            "version": "1.4.1",
+            "endpoints": {
+                "GET /": "this service descriptor",
+                "GET /health": "liveness: ok flag, control plane, products, version",
+                "POST /create-checkout-session": "start a Stripe Checkout session",
+                "POST /webhook": "Stripe webhook; mints an entitlement on payment",
+                "GET /entitlement/<box_id>": "read the entitlement for a box id",
+                "GET /entitlement/by-order/<order_id>": "read the entitlement by order id",
+                "POST /mint": "operator mint of an entitlement",
+                "GET /verify/<box_id>": "verify a box entitlement",
+            },
+            "license": "AGPL-3.0-or-later OR Slid Phi Labs Commercial License",
+            "contact": "corey@slidphilabs.com",
+        }
+    )
+
+
 @app.route("/health")
 def health():
     return jsonify(
