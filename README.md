@@ -1,3 +1,7 @@
+> **This repo has moved into the verse.** Development continues at
+> [ceedot-rock/MemoryVerse](https://github.com/ceedot-rock/MemoryVerse), in folder json-chamber-sdk/.
+> This copy is archived and read-only - history preserved, nothing lost.
+
 # json-chamber
 
 [![Audited checks](https://github.com/ceedot-rock/json-chamber-sdk/actions/workflows/audited-checks.yml/badge.svg)](https://github.com/ceedot-rock/json-chamber-sdk/actions/workflows/audited-checks.yml)
